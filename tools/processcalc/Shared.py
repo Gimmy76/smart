@@ -1,0 +1,10 @@
+ATTR_PID = 'pid'
+ATTR_NAME = 'name'
+ATTR_CPU = 'cpu_percent'
+ATTR_MEMORY = 'memory_percent'
+
+CSV_COL_TIMES_INDEX = 'Time (s)'
+CSV_COL_PROCESSID_INDEX = 'Process ID'
+CSV_COL_PROCESSCMD_INDEX = 'Process Command'
+CSV_COL_CPU_INDEX = 'CPU Usage (%)'
+CSV_COL_MEMORY_INDEX = 'Memory Usage (%)'

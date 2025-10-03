@@ -1,0 +1,452 @@
+{
+  "h1": {
+    "ip": "10.0.1.1",
+    "router_switch": "s1",
+    "mac": "00:00:00:00:00:01",
+    "default_path_switch": "s101"
+  },
+  "h2": {
+    "ip": "10.0.1.2",
+    "router_switch": "s2",
+    "mac": "00:00:00:00:00:02",
+    "default_path_switch": "s101"
+  },
+  "h3": {
+    "ip": "10.0.1.3",
+    "router_switch": "s3",
+    "mac": "00:00:00:00:00:03",
+    "default_path_switch": "s101"
+  },
+  "h4": {
+    "ip": "10.0.1.4",
+    "router_switch": "s4",
+    "mac": "00:00:00:00:00:04",
+    "default_path_switch": "s101"
+  },
+  "h5": {
+    "ip": "10.0.1.5",
+    "router_switch": "s5",
+    "mac": "00:00:00:00:00:05",
+    "default_path_switch": "s101"
+  },
+  "h6": {
+    "ip": "10.0.1.6",
+    "router_switch": "s6",
+    "mac": "00:00:00:00:00:06",
+    "default_path_switch": "s101"
+  },
+  "h7": {
+    "ip": "10.0.1.7",
+    "router_switch": "s7",
+    "mac": "00:00:00:00:00:07",
+    "default_path_switch": "s101"
+  },
+  "h8": {
+    "ip": "10.0.1.8",
+    "router_switch": "s8",
+    "mac": "00:00:00:00:00:08",
+    "default_path_switch": "s101"
+  },
+  "h9": {
+    "ip": "10.0.1.9",
+    "router_switch": "s9",
+    "mac": "00:00:00:00:00:09",
+    "default_path_switch": "s101"
+  },
+  "h10": {
+    "ip": "10.0.1.10",
+    "router_switch": "s10",
+    "mac": "00:00:00:00:00:10",
+    "default_path_switch": "s102"
+  },
+  "h11": {
+    "ip": "10.0.1.11",
+    "router_switch": "s11",
+    "mac": "00:00:00:00:00:11",
+    "default_path_switch": "s102"
+  },
+  "h12": {
+    "ip": "10.0.1.12",
+    "router_switch": "s12",
+    "mac": "00:00:00:00:00:12",
+    "default_path_switch": "s102"
+  },
+  "h13": {
+    "ip": "10.0.1.13",
+    "router_switch": "s13",
+    "mac": "00:00:00:00:00:13",
+    "default_path_switch": "s102"
+  },
+  "h14": {
+    "ip": "10.0.1.14",
+    "router_switch": "s14",
+    "mac": "00:00:00:00:00:14",
+    "default_path_switch": "s102"
+  },
+  "h15": {
+    "ip": "10.0.1.15",
+    "router_switch": "s15",
+    "mac": "00:00:00:00:00:15",
+    "default_path_switch": "s102"
+  },
+  "h16": {
+    "ip": "10.0.1.16",
+    "router_switch": "s16",
+    "mac": "00:00:00:00:00:16",
+    "default_path_switch": "s102"
+  },
+  "h17": {
+    "ip": "10.0.1.17",
+    "router_switch": "s17",
+    "mac": "00:00:00:00:00:17",
+    "default_path_switch": "s102"
+  },
+  "h18": {
+    "ip": "10.0.1.18",
+    "router_switch": "s18",
+    "mac": "00:00:00:00:00:18",
+    "default_path_switch": "s102"
+  },
+  "h19": {
+    "ip": "10.0.1.19",
+    "router_switch": "s19",
+    "mac": "00:00:00:00:00:19",
+    "default_path_switch": "s103"
+  },
+  "h20": {
+    "ip": "10.0.1.20",
+    "router_switch": "s20",
+    "mac": "00:00:00:00:00:20",
+    "default_path_switch": "s103"
+  },
+  "h21": {
+    "ip": "10.0.1.21",
+    "router_switch": "s21",
+    "mac": "00:00:00:00:00:21",
+    "default_path_switch": "s103"
+  },
+  "h22": {
+    "ip": "10.0.1.22",
+    "router_switch": "s22",
+    "mac": "00:00:00:00:00:22",
+    "default_path_switch": "s103"
+  },
+  "h23": {
+    "ip": "10.0.1.23",
+    "router_switch": "s23",
+    "mac": "00:00:00:00:00:23",
+    "default_path_switch": "s103"
+  },
+  "h24": {
+    "ip": "10.0.1.24",
+    "router_switch": "s24",
+    "mac": "00:00:00:00:00:24",
+    "default_path_switch": "s103"
+  },
+  "h25": {
+    "ip": "10.0.1.25",
+    "router_switch": "s25",
+    "mac": "00:00:00:00:00:25",
+    "default_path_switch": "s103"
+  },
+  "h26": {
+    "ip": "10.0.1.26",
+    "router_switch": "s26",
+    "mac": "00:00:00:00:00:26",
+    "default_path_switch": "s103"
+  },
+  "h27": {
+    "ip": "10.0.1.27",
+    "router_switch": "s27",
+    "mac": "00:00:00:00:00:27",
+    "default_path_switch": "s103"
+  },
+  "h28": {
+    "ip": "10.0.1.28",
+    "router_switch": "s28",
+    "mac": "00:00:00:00:00:28",
+    "default_path_switch": "s104"
+  },
+  "h29": {
+    "ip": "10.0.1.29",
+    "router_switch": "s29",
+    "mac": "00:00:00:00:00:29",
+    "default_path_switch": "s104"
+  },
+  "h30": {
+    "ip": "10.0.1.30",
+    "router_switch": "s30",
+    "mac": "00:00:00:00:00:30",
+    "default_path_switch": "s104"
+  },
+  "h31": {
+    "ip": "10.0.1.31",
+    "router_switch": "s31",
+    "mac": "00:00:00:00:00:31",
+    "default_path_switch": "s104"
+  },
+  "h32": {
+    "ip": "10.0.1.32",
+    "router_switch": "s32",
+    "mac": "00:00:00:00:00:32",
+    "default_path_switch": "s104"
+  },
+  "h33": {
+    "ip": "10.0.1.33",
+    "router_switch": "s33",
+    "mac": "00:00:00:00:00:33",
+    "default_path_switch": "s104"
+  },
+  "h34": {
+    "ip": "10.0.1.34",
+    "router_switch": "s34",
+    "mac": "00:00:00:00:00:34",
+    "default_path_switch": "s104"
+  },
+  "h35": {
+    "ip": "10.0.1.35",
+    "router_switch": "s35",
+    "mac": "00:00:00:00:00:35",
+    "default_path_switch": "s104"
+  },
+  "h36": {
+    "ip": "10.0.1.36",
+    "router_switch": "s36",
+    "mac": "00:00:00:00:00:36",
+    "default_path_switch": "s104"
+  },
+  "h37": {
+    "ip": "10.0.1.37",
+    "router_switch": "s37",
+    "mac": "00:00:00:00:00:37",
+    "default_path_switch": "s104"
+  },
+  "h38": {
+    "ip": "10.0.1.38",
+    "router_switch": "s38",
+    "mac": "00:00:00:00:00:38",
+    "default_path_switch": "s105"
+  },
+  "h39": {
+    "ip": "10.0.1.39",
+    "router_switch": "s39",
+    "mac": "00:00:00:00:00:39",
+    "default_path_switch": "s105"
+  },
+  "h40": {
+    "ip": "10.0.1.40",
+    "router_switch": "s40",
+    "mac": "00:00:00:00:00:40",
+    "default_path_switch": "s105"
+  },
+  "h41": {
+    "ip": "10.0.1.41",
+    "router_switch": "s41",
+    "mac": "00:00:00:00:00:41",
+    "default_path_switch": "s105"
+  },
+  "h42": {
+    "ip": "10.0.1.42",
+    "router_switch": "s42",
+    "mac": "00:00:00:00:00:42",
+    "default_path_switch": "s105"
+  },
+  "h43": {
+    "ip": "10.0.1.43",
+    "router_switch": "s43",
+    "mac": "00:00:00:00:00:43",
+    "default_path_switch": "s105"
+  },
+  "h44": {
+    "ip": "10.0.1.44",
+    "router_switch": "s44",
+    "mac": "00:00:00:00:00:44",
+    "default_path_switch": "s105"
+  },
+  "h45": {
+    "ip": "10.0.1.45",
+    "router_switch": "s45",
+    "mac": "00:00:00:00:00:45",
+    "default_path_switch": "s105"
+  },
+  "h46": {
+    "ip": "10.0.1.46",
+    "router_switch": "s46",
+    "mac": "00:00:00:00:00:46",
+    "default_path_switch": "s105"
+  },
+  "h47": {
+    "ip": "10.0.1.47",
+    "router_switch": "s47",
+    "mac": "00:00:00:00:00:47",
+    "default_path_switch": "s106"
+  },
+  "h48": {
+    "ip": "10.0.1.48",
+    "router_switch": "s48",
+    "mac": "00:00:00:00:00:48",
+    "default_path_switch": "s106"
+  },
+  "h49": {
+    "ip": "10.0.1.49",
+    "router_switch": "s49",
+    "mac": "00:00:00:00:00:49",
+    "default_path_switch": "s106"
+  },
+  "h50": {
+    "ip": "10.0.1.50",
+    "router_switch": "s50",
+    "mac": "00:00:00:00:00:50",
+    "default_path_switch": "s106"
+  },
+  "h51": {
+    "ip": "10.0.1.51",
+    "router_switch": "s51",
+    "mac": "00:00:00:00:00:51",
+    "default_path_switch": "s106"
+  },
+  "h52": {
+    "ip": "10.0.1.52",
+    "router_switch": "s52",
+    "mac": "00:00:00:00:00:52",
+    "default_path_switch": "s106"
+  },
+  "h53": {
+    "ip": "10.0.1.53",
+    "router_switch": "s53",
+    "mac": "00:00:00:00:00:53",
+    "default_path_switch": "s106"
+  },
+  "h54": {
+    "ip": "10.0.1.54",
+    "router_switch": "s54",
+    "mac": "00:00:00:00:00:54",
+    "default_path_switch": "s106"
+  },
+  "h55": {
+    "ip": "10.0.1.55",
+    "router_switch": "s55",
+    "mac": "00:00:00:00:00:55",
+    "default_path_switch": "s106"
+  },
+  "h56": {
+    "ip": "10.0.1.56",
+    "router_switch": "s56",
+    "mac": "00:00:00:00:00:56",
+    "default_path_switch": "s106"
+  },
+  "h57": {
+    "ip": "10.0.1.57",
+    "router_switch": "s57",
+    "mac": "00:00:00:00:00:57",
+    "default_path_switch": "s107"
+  },
+  "h58": {
+    "ip": "10.0.1.58",
+    "router_switch": "s58",
+    "mac": "00:00:00:00:00:58",
+    "default_path_switch": "s107"
+  },
+  "h59": {
+    "ip": "10.0.1.59",
+    "router_switch": "s59",
+    "mac": "00:00:00:00:00:59",
+    "default_path_switch": "s107"
+  },
+  "h60": {
+    "ip": "10.0.1.60",
+    "router_switch": "s60",
+    "mac": "00:00:00:00:00:60",
+    "default_path_switch": "s107"
+  },
+  "h61": {
+    "ip": "10.0.1.61",
+    "router_switch": "s61",
+    "mac": "00:00:00:00:00:61",
+    "default_path_switch": "s107"
+  },
+  "h62": {
+    "ip": "10.0.1.62",
+    "router_switch": "s62",
+    "mac": "00:00:00:00:00:62",
+    "default_path_switch": "s107"
+  },
+  "h63": {
+    "ip": "10.0.1.63",
+    "router_switch": "s63",
+    "mac": "00:00:00:00:00:63",
+    "default_path_switch": "s107"
+  },
+  "h64": {
+    "ip": "10.0.1.64",
+    "router_switch": "s64",
+    "mac": "00:00:00:00:00:64",
+    "default_path_switch": "s107"
+  },
+  "h65": {
+    "ip": "10.0.1.65",
+    "router_switch": "s65",
+    "mac": "00:00:00:00:00:65",
+    "default_path_switch": "s107"
+  },
+  "h66": {
+    "ip": "10.0.1.66",
+    "router_switch": "s66",
+    "mac": "00:00:00:00:00:66",
+    "default_path_switch": "s108"
+  },
+  "h67": {
+    "ip": "10.0.1.67",
+    "router_switch": "s67",
+    "mac": "00:00:00:00:00:67",
+    "default_path_switch": "s108"
+  },
+  "h68": {
+    "ip": "10.0.1.68",
+    "router_switch": "s68",
+    "mac": "00:00:00:00:00:68",
+    "default_path_switch": "s108"
+  },
+  "h69": {
+    "ip": "10.0.1.69",
+    "router_switch": "s69",
+    "mac": "00:00:00:00:00:69",
+    "default_path_switch": "s108"
+  },
+  "h70": {
+    "ip": "10.0.1.70",
+    "router_switch": "s70",
+    "mac": "00:00:00:00:00:70",
+    "default_path_switch": "s108"
+  },
+  "h71": {
+    "ip": "10.0.1.71",
+    "router_switch": "s71",
+    "mac": "00:00:00:00:00:71",
+    "default_path_switch": "s108"
+  },
+  "h72": {
+    "ip": "10.0.1.72",
+    "router_switch": "s72",
+    "mac": "00:00:00:00:00:72",
+    "default_path_switch": "s108"
+  },
+  "h73": {
+    "ip": "10.0.1.73",
+    "router_switch": "s73",
+    "mac": "00:00:00:00:00:73",
+    "default_path_switch": "s108"
+  },
+  "h74": {
+    "ip": "10.0.1.74",
+    "router_switch": "s74",
+    "mac": "00:00:00:00:00:74",
+    "default_path_switch": "s108"
+  },
+  "h75": {
+    "ip": "10.0.1.75",
+    "router_switch": "s75",
+    "mac": "00:00:00:00:00:75",
+    "default_path_switch": "s108"
+  }
+}
