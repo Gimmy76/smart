@@ -2,7 +2,7 @@
 import numpy as np
 from mininet.link import TCLink
 from mininet.net import Mininet
-from mininet.node import Controller, OVSSwitch, CPULimitedHost
+from mininet.node import Controller, OVSSwitch, Host as CPULimitedHost
 from mininet.link import  Link,OVSLink
 from mininet.term import makeTerm
 from mininet.topo import Topo
@@ -12,7 +12,7 @@ import random
 from decimal import Decimal
 import subprocess
 
-from tensorflow.python.ops.numpy_ops import floor
+from math import floor
 
 import Shared as shared
 from SwitchGrouping import SwitchGrouper
@@ -124,12 +124,12 @@ class NetworkTopo( Topo ):
         info("*** Creating switches\n")
 
         # Server switch
-        s0 = self.addSwitch('s0')
+        s0 = self.addSwitch(GLOBALS.s0_switch)
 
         # Generate the controlled switches list dynamically
         GLOBALS.controlled_switches_list = []
         for i in range(1, GLOBALS.num_controlled_switches + 1):
-            switch_name = f's{100 + i}'
+            switch_name = f's{100 + i}_{GLOBALS.instance_id}'
             GLOBALS.controlled_switches_list.append(switch_name)
             switch_node = self.addSwitch(switch_name)
             info(f"*** Created controlled switch {switch_name}\n")
@@ -151,7 +151,7 @@ class NetworkTopo( Topo ):
 
         # Initialize network_spec for all switches
         GLOBALS.network_spec['switches'] = {
-            's0': {
+            GLOBALS.s0_switch: {
                 'ports': [],
                 'connections': {}
             }
@@ -176,10 +176,10 @@ class NetworkTopo( Topo ):
 
         # Setup connections to s0 for each controlled switch
         for switch in GLOBALS.controlled_switches_list:
-            s0_to_switch_interface = f's0-eth{switch.lstrip("s")}'
-            switch_to_s0_interface = f'{switch}-eth0'
+            s0_to_switch_interface = shared.get_interface_name(GLOBALS.s0_switch, switch)
+            switch_to_s0_interface = shared.get_interface_name(switch, GLOBALS.s0_switch)
 
-            GLOBALS.network_spec['switches'][switch]['connections']['s0'] = {
+            GLOBALS.network_spec['switches'][switch]['connections'][GLOBALS.s0_switch] = {
                 'src_int': switch_to_s0_interface,
                 'dst_int': s0_to_switch_interface,
                 'bw': f'{s0_bandwidthes[f"{GLOBALS.s0_switch}-{switch}"]}'
@@ -189,11 +189,11 @@ class NetworkTopo( Topo ):
                 GLOBALS.network_spec['switches'][switch]['ports'] = []
             GLOBALS.network_spec['switches'][switch]['ports'].append(switch_to_s0_interface)
 
-            if 'ports' not in GLOBALS.network_spec['switches']['s0']:
-                GLOBALS.network_spec['switches']['s0']['ports'] = []
-            GLOBALS.network_spec['switches']['s0']['ports'].append(s0_to_switch_interface)
+            if 'ports' not in GLOBALS.network_spec['switches'][GLOBALS.s0_switch]:
+                GLOBALS.network_spec['switches'][GLOBALS.s0_switch]['ports'] = []
+            GLOBALS.network_spec['switches'][GLOBALS.s0_switch]['ports'].append(s0_to_switch_interface)
 
-            GLOBALS.network_spec['switches']['s0']['connections'][switch] = {
+            GLOBALS.network_spec['switches'][GLOBALS.s0_switch]['connections'][switch] = {
                 'src_int': s0_to_switch_interface,
                 'dst_int': switch_to_s0_interface,
                 'bw': f'{s0_bandwidthes[f"{GLOBALS.s0_switch}-{switch}"]}'
@@ -269,14 +269,14 @@ class NetworkTopo( Topo ):
                 ]
             }
         # Setup ports for s0 switch
-        GLOBALS.network_spec['switches']['s0']['ports'].extend(["s0-eth0", f"s0-eth{GLOBALS.num_controlled_switches + 2}"])
+        GLOBALS.network_spec['switches'][GLOBALS.s0_switch]['ports'].extend([f"{GLOBALS.s0_switch}-eth0", f"{GLOBALS.s0_switch}-eth{GLOBALS.num_controlled_switches + 2}"])
         # Setup hosts in network_spec
         GLOBALS.network_spec['hosts'] = {
             GLOBALS.default_server: {
                 'ip': '10.0.1.101',
-                'router_switch': 's0',
+                'router_switch': GLOBALS.s0_switch,
                 'src_int': f'{GLOBALS.default_server}-eth0',
-                'dst_int': 's0-eth0',
+                'dst_int': f'{GLOBALS.s0_switch}-eth0',
                 'connected': True,
                 'bw': f'{hosts_bandwidthes[GLOBALS.default_server]}',
                 'mac': '00:00:00:00:01:00'
@@ -317,11 +317,11 @@ class NetworkTopo( Topo ):
         # Create links from controlled switches to s0
         for src_switch in GLOBALS.controlled_switches_list:
             info(
-                f"*** Init link {src_switch}({GLOBALS.network_spec['switches'][src_switch]['connections']['s0']['src_int']}) --> s0({GLOBALS.network_spec['switches'][src_switch]['connections']['s0']['dst_int']}) with bw = {float(GLOBALS.network_spec['switches'][src_switch]['connections']['s0']['bw'])}  ***\n")
+                f"*** Init link {src_switch}({GLOBALS.network_spec['switches'][src_switch]['connections'][GLOBALS.s0_switch]['src_int']}) --> s0({GLOBALS.network_spec['switches'][src_switch]['connections'][GLOBALS.s0_switch]['dst_int']}) with bw = {float(GLOBALS.network_spec['switches'][src_switch]['connections'][GLOBALS.s0_switch]['bw'])}  ***\n")
             self.addLink(src_switch, s0,
-                         intfName1=GLOBALS.network_spec['switches'][src_switch]['connections']['s0']['src_int'],
-                         intfName2=GLOBALS.network_spec['switches'][src_switch]['connections']['s0']['dst_int'],
-                         bw=float(GLOBALS.network_spec['switches'][src_switch]['connections']['s0']['bw']),
+                         intfName1=GLOBALS.network_spec['switches'][src_switch]['connections'][GLOBALS.s0_switch]['src_int'],
+                         intfName2=GLOBALS.network_spec['switches'][src_switch]['connections'][GLOBALS.s0_switch]['dst_int'],
+                         bw=float(GLOBALS.network_spec['switches'][src_switch]['connections'][GLOBALS.s0_switch]['bw']),
                          max_queue_size=max_switch_queue_size)
 
         # Create links between controlled switches
@@ -379,15 +379,27 @@ def run_mininet(_GLOBALS):
     global GLOBALS
     GLOBALS = _GLOBALS
 
-    # Clean Mininet context
-    process = subprocess.Popen("mn -c", shell=True, stdout=subprocess.PIPE)
-    process.wait()
+    # Clean Mininet context - cleanup selettivo per questa istanza
+    import os as _os
+    iid = _os.getenv('INSTANCE_ID', '0')
+    suffix = f"_{iid}"
+    subprocess.run(
+        f"for br in $(sudo ovs-vsctl list-br 2>/dev/null | grep '{suffix}$'); do "
+        f"sudo ovs-vsctl --if-exists del-br $br 2>/dev/null; done",
+        shell=True, timeout=20)
+    subprocess.run(
+        f"for iface in $(ip -o link show 2>/dev/null | awk -F\'\': \'\' \'{{print $2}}\' | cut -d\'@\' -f1 "
+        f"| grep -E \'{suffix}(-eth|$)\'); do sudo ip link delete \"$iface\" 2>/dev/null || true; done",
+        shell=True, timeout=20)
 
     topo = NetworkTopo()
     GLOBALS.net = Mininet(topo=topo, controller=None, switch=OVSSwitch, waitConnected=False, link=TCLink, host=CPULimitedHost)
 
     # Create a NAT network connected to s0 (first created switch)
-    GLOBALS.net.addNAT().configDefault()
+    import os as _os
+    _iid = _os.getenv('INSTANCE_ID', '0')
+    _nat_name = f'nat0_{_iid}' if _iid else 'nat0'
+    GLOBALS.net.addNAT(name=_nat_name).configDefault()
 
     GLOBALS.net.start()
 
@@ -431,7 +443,7 @@ def run_mininet(_GLOBALS):
 
     # s0 to 8.8.8.8
     commands.append(shared.init_flow_for_global_dns_from_server_switch(GLOBALS.s0_switch, GLOBALS.highest_priority,
-                                                                  GLOBALS.global_dns, f"s0-eth{GLOBALS.num_controlled_switches + 2}"))
+                                                                  GLOBALS.global_dns, f"{GLOBALS.s0_switch}-eth{GLOBALS.num_controlled_switches + 2}"))
 
     # s0 to hs
     commands.append(shared.init_flow_from_switch_to_direct_host_via_mac(GLOBALS.s0_switch, GLOBALS.highest_priority,
