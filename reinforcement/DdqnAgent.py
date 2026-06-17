@@ -4,15 +4,15 @@ import tensorflow as tf
 from tensorflow.keras import backend as K
 
 # from keras.utils import plot_model
-from tensorflow.python.keras import Input, Model
-from tensorflow.python.keras.layers import Dense, Concatenate, Maximum
-from tensorflow.python.keras.optimizer_v2.adam import Adam
+from tensorflow.keras import Input, Model
+from tensorflow.keras.layers import Dense, Concatenate, Maximum
+from tensorflow.keras.optimizers import Adam
 
 from Util import Util
 
 from collections import deque
 
-from tensorflow.python.keras.saving.save import load_model
+from tensorflow.keras.models import load_model
 
 
 class DoubleDeepQNetwork():
@@ -35,7 +35,7 @@ class DoubleDeepQNetwork():
         self.learning_rate = 0.025  #   0.01 0.001
         # self.tau = 0.125 # TODO: Possible future improvement
         self.batch_size = 8
-        self.experience_reply_size = 125
+        self.experience_reply_size = max(125, self.batch_size * 4)
         self.experience_replay_memory = deque(maxlen=self.experience_reply_size)
         self.update_target_each = 10 # steps
         self.epoch_count = 10
@@ -83,12 +83,12 @@ class DoubleDeepQNetwork():
         """
         # Group metrics input is larger as it contains statistical aggregations
         input = Input(shape=(self.env.gi_model_input_size,))
-        intermediate = Dense(self.env.gi_model_input_size + self.env.gi_model_output_size, activation='relu')(input)
-        output = Dense(self.env.gi_model_output_size, activation='relu', kernel_initializer='he_uniform')(intermediate)
+        intermediate = Dense(int(self.env.gi_model_input_size + self.env.gi_model_output_size), activation='relu')(input)
+        output = Dense(int(self.env.gi_model_output_size), activation='relu', kernel_initializer='he_uniform')(intermediate)
         return Model(
             name=name,
             inputs=[input],
-            outputs=[output],
+            outputs=output,
         )
 
     def gen_goi_model(self, name):
@@ -109,14 +109,14 @@ class DoubleDeepQNetwork():
         g_pool_input = Input(shape=(self.env.gi_model_output_size,))
         s_input = Input(shape=(self.env.controlled_switches_layer_input,))
         concat_layer = Concatenate()([gi_input, g_pool_input, s_input])
-        intermediate = Dense(self.env.gi_model_input_size + self.env.gi_model_output_size +
-                            self.env.controlled_switches_layer_input + self.env.goi_model_output_size,
+        intermediate = Dense(int(self.env.gi_model_input_size + self.env.gi_model_output_size +
+                            self.env.controlled_switches_layer_input + self.env.goi_model_output_size),
                             activation='relu')(concat_layer)
-        output = Dense(self.env.goi_model_output_size,)(intermediate)
+        output = Dense(int(self.env.goi_model_output_size),)(intermediate)
         return Model(
             name=name,
             inputs=[gi_input, g_pool_input, s_input],
-            outputs=[output],
+            outputs=output,
         )
 
 
@@ -133,12 +133,12 @@ class DoubleDeepQNetwork():
         h_pool_input = Input(shape=(self.env.gi_model_output_size,))
         s_input = Input(shape=(self.env.controlled_switches_layer_input,))
         concat_layer = Concatenate()([h_pool_input, s_input])
-        intermediate = Dense(self.env.gi_model_output_size + self.env.controlled_switches_layer_input + 1, activation='relu')(concat_layer)
+        intermediate = Dense(int(self.env.gi_model_output_size + self.env.controlled_switches_layer_input + 1), activation='relu')(concat_layer)
         output = Dense(1, )(intermediate)
         return Model(
             name=name,
             inputs=[h_pool_input, s_input],
-            outputs=[output],
+            outputs=output,
         )
 
     def get_s_model(self, name):
@@ -154,13 +154,13 @@ class DoubleDeepQNetwork():
         h_pool_input = Input(shape=(self.env.gi_model_output_size,))
         s_input = Input(shape=(self.env.controlled_switches_layer_input,))
         concat_layer = Concatenate()([h_pool_input, s_input])
-        intermediate = Dense(self.env.gi_model_output_size + self.env.controlled_switches_layer_input +
-                            self.env.s_model_output_size, activation='relu')(concat_layer)
-        output = Dense(self.env.s_model_output_size, )(intermediate)
+        intermediate = Dense(int(self.env.gi_model_output_size + self.env.controlled_switches_layer_input +
+                            self.env.s_model_output_size), activation='relu')(concat_layer)
+        output = Dense(int(self.env.s_model_output_size), )(intermediate)
         return Model(
             name=name,
             inputs=[h_pool_input, s_input],
-            outputs=[output],
+            outputs=output,
         )
 
     def build_model(self):
@@ -191,12 +191,19 @@ class DoubleDeepQNetwork():
 
         # Handle max_pool for empty list or single element
         def safe_max_pool(tensor_list):
-            if not tensor_list:  # If list is empty
-                # Return a zero tensor of appropriate shape
+            # Flatten any nested lists
+            flat = []
+            for t in tensor_list:
+                if isinstance(t, list):
+                    flat.extend(t)
+                else:
+                    flat.append(t)
+            tensor_list = flat
+            if not tensor_list:
                 sample_shape = K.int_shape(gi_model.output)[1:]
                 return tf.zeros([1] + list(sample_shape), dtype=tf.float32)
-            elif len(tensor_list) == 1:  # If only one element
-                return tensor_list[0]  # Return the single element
+            elif len(tensor_list) == 1:
+                return tensor_list[0]
             else:
                 return self.max_pool(tensor_list)
 
@@ -218,7 +225,7 @@ class DoubleDeepQNetwork():
         model = Model(
             name='full-model',
             inputs=gi_inputs + [s_inputs],
-            outputs=[concat_layer],
+            outputs=concat_layer,
         )
         model.compile(loss="mse", optimizer=Adam(learning_rate=self.learning_rate))
 
@@ -413,8 +420,9 @@ class DoubleDeepQNetwork():
         hist = self.model.fit(x, y, batch_size=batch_size, epochs=self.epoch_count, verbose=1)
         # Graph Losses
         min_loss = 10000000000
-        for i in range(self.epoch_count):
-            min_loss = min(min_loss, hist.history['loss'][i])
+        if hist.history.get('loss'):
+            for i in range(min(self.epoch_count, len(hist.history['loss']))):
+                min_loss = min(min_loss, hist.history['loss'][i])
         self.loss.append(min_loss)
         self.episode_loss.append(min_loss)
         # Decay Epsilon
@@ -430,6 +438,14 @@ class DoubleDeepQNetwork():
 
     def set_actions(self, ACTIONS):
         self.ACTIONS = ACTIONS
+        new_nA = len(ACTIONS)
+        if new_nA != self.nA:
+            print(f'(DdqnAgent) Rebuilding model: nA changed from {self.nA} to {new_nA}')
+            self.nA = new_nA
+            self.env.OUTPUT_SHAPE = new_nA
+            self.model = self.build_model()
+            self.model_target = self.build_model()
+            self.model_target.set_weights(self.model.get_weights())
 
 
 class ModelAdapter:
@@ -486,7 +502,6 @@ class ModelAdapter:
             history = History()
             history.history = {'loss': [float('inf')]}
             history.params = {}
-            history.model = self.model
             return history
 
     def predict(self, x, **kwargs):
