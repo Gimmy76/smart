@@ -30,7 +30,23 @@ class Environment():
         self.transmission_time = self.step_duration - self.tshark_processing_duration  # = 40 seconds
         self.after_attack_duration = (
                                              self.step_duration - self.attack_duration) - self.tshark_processing_duration  # = 10 seconds
-        self.tmp_dir = os.path.dirname(os.path.abspath(__file__)) + "/tmp"
+        # Suffix tmp_dir with instance_id
+        self.instance_id = config.instance_id # Get instance_id from config
+
+        # Timing tracking (set during get_state)
+        self._t_get_state_start = 0.0
+        self._t_tshark_start = 0.0
+        self._t_flow_start = 0.0
+        self._t_attack_end = 0.0
+        self._t_after_attack_end = 0.0
+        self._t_flow_end = 0.0
+        self._t_tshark_stop = 0.0
+        self._t_netmetrics_start = 0.0
+        self._t_netmetrics_end = 0.0
+        self._t_get_state_end = 0.0
+        self._timing_csv_initialized = False
+        self.config = config
+        self.tmp_dir = os.path.dirname(os.path.abspath(__file__)) + f"/tmp_{self.instance_id}"
         self.nbr_non_server_hosts = len(config.client_hosts_list)
         self.nbr_of_servers = 1
         self.nbr_hosts = self.nbr_non_server_hosts + self.nbr_of_servers
@@ -40,16 +56,28 @@ class Environment():
         self.non_server_hosts_ordered = []
         self.interfaces = []
         self.servers = []
+        
+        # Default normal hosts and pre_set_attackers need to be suffixed
+        # config.client_hosts_list already contains suffixed names from Shared.py
         h = sorted(config.client_hosts_list)
-        h.remove(pre_set_attackers[0])
-        self.default_normal_hosts = h
+        
+        # pre_set_attackers passed to Environment.__init__ are *original* names.
+        # They need to be suffixed here to match the suffixed host names.
+        self.pre_set_attackers_suffixed = [f"{a}_{self.instance_id}" for a in pre_set_attackers]
+        
+        # Remove suffixed pre_set_attackers from the sorted list of client hosts
+        for attacker_s in self.pre_set_attackers_suffixed:
+            if attacker_s in h:
+                h.remove(attacker_s)
+        
+        self.default_normal_hosts = h # These are now suffixed
         self.normal_hosts = []
         self.attacker_hosts = []
         self.pre_set_attackers = pre_set_attackers
         self.victim_servers = []
         self.nbr_of_attackers = 1
         self.nbr_normal_hosts = self.nbr_hosts - (self.nbr_of_attackers + self.nbr_of_servers)
-        self.router_switches_list = config.router_switches_list
+        self.router_switches_list = [f"{s}_{self.instance_id}" for s in config.router_switches_list] # Suffix router switches
 
         # Add hosts_raw_topo attribute
         self.hosts_raw_topo = config.hosts_raw_topo if hasattr(config, 'hosts_raw_topo') else {}
@@ -87,14 +115,14 @@ class Environment():
         # self.arr_shape_data_per_controlled_switch_for_each_others = (
         #     int((self.nbr_controlled_switches - 1) * self.nbr_controlled_switches / 2.0), 1)
 
-        self.routing_switches = []
+        self.routing_switches = [] # Will be populated with suffixed names
         # Identify controlled switches from the host_default_switch_relation
+        # These are already suffixed by Shared.py
         unique_controlled_switches = set()
         for host, relation in self.host_default_switch_relation.items():
             unique_controlled_switches.add(relation['default_path_switch'])
 
-        self.controlled_switches = sorted(list(unique_controlled_switches))
-
+        self.controlled_switches = sorted(list(unique_controlled_switches)) # These are now suffixed
         self.host_groups = self.create_host_groups(save_to_file=True)
 
         # NEW STATE
@@ -153,7 +181,7 @@ class Environment():
         self.beta_delay = 1  # concentrating on delay 0.45
         self.tolerable_PKT_loss_percentage = 0.01
         self.tolerable_delay_ms = 2.0  # TODO: Check 29
-        self.tolerable_latency_s = 0.0002  # TODO: Check 29
+        self.tolerable_latency_s = 0.00001  # TODO: Check 29
         self.tolerable_jitter_s = 0.0002  # TODO: Check 29
         self.max_PKT_loss_percentage = 0.8
         self.max_delay_ms = 2000  # TODO: Check 29 # originally 400
@@ -165,6 +193,11 @@ class Environment():
         self.last_recorded_latency = 0.0
         self.latency_tracker = ValuesTracker()
         self.last_recorded_jitter = 0.0
+        self.last_recorded_loss = 0.0
+        self.loss_tracker = ValuesTracker()
+        self.w_loss = 1.0
+        self.tolerable_loss = 0.10
+        self.threshold_loss = 0.05
         self.jitter_tracker = ValuesTracker()
         self.before_last_recorded_delay = 0.0
         self.last_recorded_tx = {}
@@ -197,13 +230,13 @@ class Environment():
             A dictionary mapping from source switch to a list of directly connected switches.
         """
         connections = {}
-        switch_grouper = SwitchGrouper(self.controlled_switches)
+        switch_grouper = SwitchGrouper(self.controlled_switches) # self.controlled_switches already contains suffixed names
         switch_groups = switch_grouper.get_switch_groups()
         switch_grouper.save_switch_groups(self.switch_grouping_file_path, switch_groups)
         
         # Initialize connections dictionary for all controlled switches
-        for switch in self.controlled_switches:
-            connections[switch] = {}
+        for switch in self.controlled_switches: # switch names are suffixed
+            connections[switch] = {} 
             connections[switch]['switch_neighbors'] = switch_groups['switch_neighbors'][switch]
             connections[switch]['switch_neighbors_next'] = switch_groups['switch_neighbors_next'][switch]
         print(f"Switch connections: {connections}")
@@ -241,7 +274,7 @@ class Environment():
             hosts_by_switch[default_switch]['normal'].append(host)
 
         # Also group attackers by their default switch
-        for host in self.pre_set_attackers:
+        for host in self.pre_set_attackers_suffixed: # These are suffixed
             if host not in self.host_default_switch_relation:
                 raise Exception(f"Attacker {host} not found in host_default_switch_relation. Please check host configuration.")
 
@@ -260,11 +293,11 @@ class Environment():
             raise Exception("No hosts could be assigned to switches. Please check switch configuration.")
 
         # Step 2: Now create the actual groups
-        for switch, hosts in hosts_by_switch.items():
+        for switch, hosts in hosts_by_switch.items(): # switch names are suffixed
             # Create a separate group for attackers if any
             if hosts['attackers']:
-                host_groups[f"group_{group_id}"] = {
-                    'hosts': hosts['attackers'],
+                host_groups[f"group_{group_id}_{self.instance_id}"] = { # Suffix group name
+                    'hosts': hosts['attackers'], 
                     'type': 'attacker',
                     'switch': switch
                 }
@@ -274,8 +307,8 @@ class Environment():
             normal_hosts = hosts['normal']
             if normal_hosts:
                 if len(normal_hosts) <= 4:  # For small number of hosts, just one group
-                    host_groups[f"group_{group_id}"] = {
-                        'hosts': normal_hosts,
+                    host_groups[f"group_{group_id}_{self.instance_id}"] = { # Suffix group name
+                        'hosts': normal_hosts, 
                         'type': 'normal',
                         'switch': switch
                     }
@@ -283,15 +316,15 @@ class Environment():
                 else:  # Split into two groups
                     mid = len(normal_hosts) // 2
                     # First group
-                    host_groups[f"group_{group_id}"] = {
-                        'hosts': normal_hosts[:mid],
+                    host_groups[f"group_{group_id}_{self.instance_id}"] = { # Suffix group name
+                        'hosts': normal_hosts[:mid], 
                         'type': 'normal',
                         'switch': switch
                     }
                     group_id += 1
                     # Second group
-                    host_groups[f"group_{group_id}"] = {
-                        'hosts': normal_hosts[mid:],
+                    host_groups[f"group_{group_id}_{self.instance_id}"] = { # Suffix group name
+                        'hosts': normal_hosts[mid:], 
                         'type': 'normal',
                         'switch': switch
                     }
@@ -333,7 +366,7 @@ class Environment():
         os.makedirs(self.tmp_dir, exist_ok=True)
         
         # File path
-        json_path = os.path.join(self.tmp_dir, 'host_groups.json')
+        json_path = os.path.join(self.tmp_dir, f'host_groups_{self.instance_id}.json') # Suffix with instance_id
         
         # Save to file
         with open(json_path, 'w') as f:
@@ -346,18 +379,22 @@ class Environment():
 
     def update_hosts(self):
         self.hosts = []
-        for i in range(1, self.nbr_hosts):
-            self.hosts.append(f'h{i}')
-        self.hosts.append(f'hs')
+        # config.client_hosts_list is already suffixed
+        for host_name in sorted(self.config.client_hosts_list):
+            self.hosts.append(host_name)
+        self.hosts.append(f'hs_{self.instance_id}') # Suffix server host
         print(f"(Reinforcement) ==> environment.hosts = {self.hosts}")
 
     def update_hosts_ips(self, http_client):
         self.hosts_ips = {}
         self.normal_hosts_ips_array = []
-        for host in self.hosts:
+        self.attacker_ips_array = []
+        for host in self.hosts: # These are suffixed
             self.hosts_ips[host] = http_client.get_ip_by_host_name(host).text
             if (host not in self.servers) and (host not in self.attacker_hosts):
                 self.normal_hosts_ips_array.append(self.hosts_ips[host])
+            elif host in self.attacker_hosts:
+                self.attacker_ips_array.append(self.hosts_ips[host])
         print(f"(Reinforcement) ==> environment.hosts_ips = {self.hosts_ips}")
 
     def update_interfaces(self, interfaces):
@@ -458,12 +495,12 @@ class Environment():
         self.victim_servers = []
 
         self.server_election()
-        self.attacker_election(pre_set_attackers)
+        self.attacker_election(pre_set_attackers) # pre_set_attackers are original names, attacker_election will suffix them
 
         self.routing_switches = []
-        for i in range(1, self.nbr_routing_switches + 1):
-            self.routing_switches.append(f's{i}')
-
+        # config.router_switches_list is already suffixed by Shared.py
+        for s_name in self.config.router_switches_list:
+            self.routing_switches.append(s_name)
         print(f"Identified controlled switches: {self.controlled_switches}")
         print(f"Total controlled switches: {self.nbr_controlled_switches}")
 
@@ -474,7 +511,7 @@ class Environment():
 
         # Also set the path in the config object for the network module to use
         if hasattr(self, 'config'):
-            self.config.host_groups_json_path = self.host_groups_json_path
+            self.config.host_groups_json_path = self.host_groups_json_path # This path needs to be suffixed
 
         # Now extend non_server_hosts_ordered to include attackers
         self.non_server_hosts_ordered.extend(self.attacker_hosts)
@@ -490,21 +527,21 @@ class Environment():
         self.ACTIONS = []
 
         # Add group-based actions
-        for group_name, group_info in self.host_groups.items():
-            controlled_switch = group_info['switch']
+        for group_name, group_info in self.host_groups.items(): # group_name and group_info['switch'] are suffixed
+            controlled_switch = group_info['switch'] 
 
             # Add self redirection in order to "undo" a redirection
             self.ACTIONS.append(Util.group_action(group_name, controlled_switch))
             # Add redirect actions for each group to each controlled switch
             # Only create redirect actions for switches that are connected
-            for dst_switch in self.switch_connections[controlled_switch]['switch_neighbors']:
+            for dst_switch in self.switch_connections[controlled_switch]['switch_neighbors']: # dst_switch is suffixed
                 self.ACTIONS.append(Util.group_action(group_name, dst_switch))
 
-        for src_switch in self.controlled_switches:
+        for src_switch in self.controlled_switches: # src_switch is suffixed
             for bw_action in range(self.NBR_POSSIBLE_CONTROLLED_SWITCH_BW_ACTIONS):
-                self.ACTIONS.append(Util.bw_action(src_switch, 's0', bw_action))
-        for src_switch in self.controlled_switches:
-            for dst_switch in self.switch_connections[src_switch]['switch_neighbors_next']:
+                self.ACTIONS.append(Util.bw_action(src_switch, f's0_{self.instance_id}', bw_action)) # Suffix s0
+        for src_switch in self.controlled_switches: # src_switch is suffixed
+            for dst_switch in self.switch_connections[src_switch]['switch_neighbors_next']: # dst_switch is suffixed
                 for bw_action in range(self.NBR_POSSIBLE_CONTROLLED_SWITCH_BW_ACTIONS):
                     self.ACTIONS.append(Util.bw_action(src_switch, dst_switch, bw_action))
 
@@ -535,6 +572,11 @@ class Environment():
         self.last_recorded_latency = 0.0
         self.latency_tracker.clear()
         self.last_recorded_jitter = 0.0
+        self.last_recorded_loss = 0.0
+        self.loss_tracker = ValuesTracker()
+        self.w_loss = 1.0
+        self.tolerable_loss = 0.10
+        self.threshold_loss = 0.05
         self.jitter_tracker.clear()
         self.before_last_recorded_delay = 0.0
         self.last_recorded_tx = {}
@@ -543,9 +585,10 @@ class Environment():
         self.episode_actions_text_list = []
 
     def server_election(self):
-        server = 'hs'
+        server = f'hs_{self.instance_id}' # Suffix server name
         self.servers.append(server)
-        for host in self.hosts:
+        # self.hosts is populated with suffixed names
+        for host in self.hosts: 
             if host not in self.servers:
                 self.normal_hosts.append(host)
 
@@ -553,7 +596,8 @@ class Environment():
         found_attackers = 0
         # If attacker is set manually
         if len(pre_set_attackers) == self.nbr_of_attackers:
-            for attacker in pre_set_attackers:
+            for attacker_original_name in pre_set_attackers:
+                attacker = f"{attacker_original_name}_{self.instance_id}" # Suffix attacker name
                 if attacker not in self.attacker_hosts:
                     self.attacker_hosts.append(attacker)
                     self.normal_hosts.remove(attacker)
@@ -586,17 +630,25 @@ class Environment():
                     print(f'(Reinforcement) ==> electing attacker {attacker}')
 
     def get_tshark_interfaces_ids(self, cmd):
-        tshark_interfaces = cmd.get_tshark_interfaces()
-        tshark_interfaces_ids = ''
-        for i in range(len(tshark_interfaces)):
-            tshark_interface_components = tshark_interfaces[i].split('.')
-            if len(tshark_interface_components) == 2:
-                for j in range(len(self.interfaces)):
-                    if self.interfaces[j] == tshark_interface_components[1].strip():
-                        print(
-                            f'(Reinforcement) ==> interface {self.interfaces[j]} has id {tshark_interface_components[0]}')
-                        tshark_interfaces_ids = f'{tshark_interfaces_ids} -i {tshark_interface_components[0]}'
-        return tshark_interfaces_ids
+        # Use interface names directly to avoid capturing traffic from other instances
+        iid = self.instance_id
+        import subprocess
+        result = subprocess.run("ip -o link show 2>/dev/null", shell=True, stdout=subprocess.PIPE)
+        lines = result.stdout.decode("ascii").strip().split("\n")
+        tshark_ids = ""
+        for line in lines:
+            # Extract interface name (before @)
+            parts = line.split(": ", 1)
+            if len(parts) < 2:
+                continue
+            name = parts[1].split("@")[0].strip()
+            if f"_{iid}-eth" in name or name == f"s0_{iid}-eth0":
+                tshark_ids += f" -i {name}"
+        if not tshark_ids:
+            print(f"(Reinforcement) WARNING: no interfaces found for instance {iid}, using -i any")
+            tshark_ids = "-i any"
+        print(f"(Reinforcement) ==> tshark interfaces for instance {iid}: {tshark_ids}")
+        return tshark_ids
 
     def read_cic_flow_file(self, config):
         print(f'(Reinforcement) ==> Started reading PCAP file {config.cic_output_file_path}')
@@ -638,9 +690,12 @@ class Environment():
             http_client.reset_tcp_receivers()
             time.sleep(2)
 
+            self._t_get_state_start = time.time()
+            self._t_tshark_start = time.time()
             cmd.start_tshark_sniffing(tshark_interfaces_ids)
 
             # Start hosts sending
+            self._t_flow_start = time.time()
             for host in sender_receiver_relation:
                 server = sender_receiver_relation[host]
                 print(f'(Reinforcement) ==> Host {host} sending to server {server}')
@@ -659,6 +714,7 @@ class Environment():
                     http_client.start_mhddos_attack(attacker, victim_server, attack_type)
 
             time.sleep(self.attack_duration)
+            self._t_attack_end = time.time()
 
             # End attacks
             for attacker in attacker_victim_relation:
@@ -667,64 +723,37 @@ class Environment():
                     http_client.stop_mhddos_attack(attacker, attacker_victim_relation[attacker])
 
             time.sleep(self.after_attack_duration)
+            self._t_after_attack_end = time.time()
 
             http_client.stop_all_tcp_flows()
+            self._t_flow_end = time.time()
 
             # End hosts sending
 
             time.sleep(self.tshark_processing_duration)
 
             tshark_success = cmd.stop_tshark_sniffing()
+            self._t_tshark_stop = time.time()
 
             if not tshark_success:
                 self.print_state_error_message("Failed to save file of tshark", current_state_attempt,
                                                max_state_attempts, retry_delay)
                 continue
-
             http_client.stop_tcp_receivers()
-
-            # Set the maximum number of retries and the delay between each retry (in seconds)
-            max_cic_attempts = 3
-            current_cic_attempt = 0  # Initialize the attempt counter
-
-            cic_read_with_success = False
-            # Loop to attempt file generation up to the maximum number of retries
-            while current_cic_attempt < max_cic_attempts:
-                current_cic_attempt += 1  # Increment the attempt counter
-                print(
-                    f"(Reinforcement) ==> Attempt {current_cic_attempt}/{max_cic_attempts} to generate CSV file by CIC...")
-
-                # Call the function responsible for generating the file
-                cmd.run_cic()
-
-                # Check if the file has been successfully generated
-                if os.path.exists(config.cic_output_file_path):
-                    cic_read_with_success = True
-                    break  # Exit the loop if the file exists
-
-                # If the file is not found and attempts remain, wait before retrying
-                if current_cic_attempt < max_cic_attempts:
-                    print(f"(Reinforcement) ==> File not found. Retrying in {retry_delay} seconds...")
-                    time.sleep(retry_delay)  # Wait for the specified delay before retrying
-                else:
-                    # Log a message if all attempts are exhausted and the file is not generated
-                    print(
-                        f"(Reinforcement) ==> Failed to generate the file after maximum attempts ({max_cic_attempts} times).")
-
-            if not cic_read_with_success:
-                self.print_state_error_message("Failed to generate CIC file", current_state_attempt, max_state_attempts,
-                                               retry_delay)
-                continue
-
-            metrics_calculater_success = cmd.run_network_metrics_calculator(self.hosts_ips[self.servers[0]], 80,
-                                                                            self.normal_hosts_ips_array,
-                                                                            self.transmission_time, 512)
+            self._t_netmetrics_start = time.time()
+            metrics_calculater_success = cmd.run_network_metrics_calculator(self.hosts_ips[self.servers[0]], 80, self.normal_hosts_ips_array, self.transmission_time, 512)
+            # Also calculate metrics for attacker hosts separately
+            # TODO: implement attacker metrics separately
+            # if hasattr(self, 'attacker_ips_array') and self.attacker_ips_array:
+            #     cmd.run_network_metrics_calculator(self.hosts_ips[self.servers[0]], 80, self.attacker_ips_array, self.transmission_time, 512, output_file=self.config.tmp_dir + '/metrics_attacker.json')
+            self._t_netmetrics_end = time.time()
             if not metrics_calculater_success:
                 self.print_state_error_message("Failed to calculate network metrics", current_state_attempt,
                                                max_state_attempts, retry_delay)
                 continue
 
-            cic_data = self.read_cic_flow_file(config)
+            self._t_get_state_end = time.time()
+            cic_data = []  # CIC bypassed
 
             network_metrics = self.read_network_metrics_file(config)
 
@@ -756,6 +785,8 @@ class Environment():
                 self.host_last_recorded_interface_data[host] = {'tx_bytes': 0, 'rx_bytes': 0}
             for stat in switch_interface_statistics:
                 item = stat.strip().split('=')
+                if len(item) < 2:
+                    continue
                 key = item[0]
                 value = item[1]
                 if key == 'rx_bytes':
@@ -803,10 +834,14 @@ class Environment():
                 dur = self.transmission_time if host in self.normal_hosts else self.attack_duration
                 host_data['pkts_s'] = host_data['tx_packets'] / dur
                 host_data['bytes_s'] = host_data['tx_bytes'] / dur
-                host_data['loss_pct'] = ((host_data['tx_packets'] - host_data['delivered_pkts']) / host_data[
-                    'tx_packets']) if host_data['tx_packets'] < 0 else 0
+                host_data['loss_pct'] = ((host_data['tx_packets'] - host_data['delivered_pkts']) / host_data['tx_packets']) if host_data['tx_packets'] > 0 else 0.0
                 if host_data['loss_pct'] <= 0:
                     host_data['loss_pct'] = 0.001
+                # Override loss_pct with NetMetrics if available
+                if host not in self.attacker_hosts and host not in self.servers:
+                    nm = host_data.get('non_server_data', {}).get('network_metrics', {})
+                    if 'loss_pct' in nm:
+                        host_data['loss_pct'] = float(nm['loss_pct'])
 
             if host not in self.servers:
                 switches_along_the_path = http_client.get_host_path(host).json()['current']
@@ -821,8 +856,7 @@ class Environment():
                     self.attack_duration + self.after_attack_duration)
             data_per_host[server]['bytes_s'] = data_per_host[server]['rx_bytes'] / (
                     self.attack_duration + self.after_attack_duration)
-            data_per_host[server]['loss_pct'] = ((data_per_host[server]['rx_packets'] - data_per_host[server][
-                'delivered_pkts']) / data_per_host[server]['rx_packets']) if data_per_host[server]['rx_packets'] < 0 else 0
+            data_per_host[server]['loss_pct'] = ((data_per_host[server]['rx_packets'] - data_per_host[server]['delivered_pkts']) / data_per_host[server]['rx_packets']) if data_per_host[server]['rx_packets'] > 0 else 0.0
             if data_per_host[server]['loss_pct'] <= 0:
                 data_per_host[server]['loss_pct'] = 0.001
 
@@ -905,7 +939,7 @@ class Environment():
                                    [0.0, max_bytes_s],  # bytes_s
                                    [0.0, 30.0],  # latency
                                    [0.0, 30.0],  # avg_packet_transmission_time_s
-                                   [0.0, 4000000.0],  # throughput_bps
+                                   [0.0, 40000000.0],  # throughput_bps
                                    [0.0, 30.0], # jitter,
                                    [self.MIN_BW, self.MAX_BW * 6],  # Router switch bw,
                                    [0.0, 1.0],  # pass through switch 1
@@ -1018,9 +1052,10 @@ class Environment():
         for switch_index, controlled_switch in enumerate(self.controlled_switches):
             data_per_switch = state['controlled'][controlled_switch]
             switch_state_vector = np.zeros((1, self.nbr_of_controlled_switches_function_inputs))
-            switch_state_vector[0] = data_per_switch['s0']['bw']
+            s0_key = f's0_{self.instance_id}'
+            switch_state_vector[0] = data_per_switch.get(s0_key, {}).get('bw', 0.1)
             for other_switch_index, dst_switch in enumerate(self.switch_connections[controlled_switch]['switch_neighbors_next']):
-                switch_state_vector[0, other_switch_index + 1] = data_per_switch[dst_switch]['bw']
+                switch_state_vector[0, other_switch_index + 1] = data_per_switch.get(dst_switch, {}).get('bw', 0.1)
             switches_state_array[switch_index, :] = tf.transpose(self.normalize_state_vector_for_single_switch(controlled_switch, switch_state_vector))[0, :]
         return switches_state_array.astype(np.float64)
 
@@ -1058,9 +1093,9 @@ class Environment():
             max_bandwidth_mbps = 0.0
 
             # Find the connection to s0 (server switch)
-            if controlled_switch in state.get('controlled', {}) and 's0' in state['controlled'][controlled_switch]:
+            if controlled_switch in state.get('controlled', {}) and f's0_{self.instance_id}' in state['controlled'][controlled_switch]:
                 # Get bandwidth in Mbps and convert to bits/s
-                max_bandwidth_str = state['controlled'][controlled_switch]['s0']['bw']
+                max_bandwidth_str = state['controlled'][controlled_switch][f's0_{self.instance_id}']['bw']
                 max_bandwidth_mbps = float(max_bandwidth_str)
 
             # Convert max bandwidth from Mbps to bps
@@ -1184,7 +1219,7 @@ class Environment():
                     # Fall back to simple bw action instead of using group-based bandwidth control
                     # This avoids duplication with individual bw actions
                     controlled_switch = group_switch
-                    dst_switch = target  # Usually 's0'
+                    dst_switch = target  # Usually s0_<instance_id>
                     action_number = 1 if action_type == "bw_increase" else 0  # 1 for increase, 0 for decrease
                     
                     # Use the existing bw action logic
@@ -1276,7 +1311,17 @@ class Environment():
         print("(Reinforcement) ==> Calculating loss")
         total_loss_pct = 0
         for host in self.normal_hosts:
-            total_loss_pct = total_loss_pct + state['host'][host]['loss_pct']
+            nm = state['host'][host].get('non_server_data', {}).get('network_metrics', {})
+            # Stima loss_pct da throughput: se throughput basso rispetto al max atteso
+            throughput_bps = float(nm.get('throughput_bps', 0.01)) if nm else 0.01
+            max_bw_bps = float(state['host'][host].get('bandwidth', self.MIN_BW)) * 1_000_000
+            if max_bw_bps > 0:
+                loss_pct = max(0.0, 1.0 - (throughput_bps / max_bw_bps))
+                loss_pct = min(loss_pct, 1.0)
+            else:
+                loss_pct = 0.001
+            total_loss_pct += loss_pct
+            print(f'(Reinforcement) ====> Host {host} estimated loss_pct={loss_pct:.4f} (throughput={throughput_bps:.1f} bps, max_bw={max_bw_bps:.1f} bps)')
         avg_PKT_loss_percentage = total_loss_pct / self.nbr_normal_hosts
         print(f'(Reinforcement) ====> Calculated avg_loss = {avg_PKT_loss_percentage} %')
         return avg_PKT_loss_percentage
@@ -1284,20 +1329,15 @@ class Environment():
     def calculate_delay(self, state):
         print("(Reinforcement) ==> Calculating delay")
         sum_real_delay = 0
-        transmission_time_ms = (self.transmission_time * 1000)
         for host in self.normal_hosts:
-            host_delay = 0
-            if state['host'][host]['delivered_pkts'] == 0:
-                host_delay = transmission_time_ms
-            else:
-                host_delay = (transmission_time_ms / state['host'][host]['delivered_pkts'])
+            # Usa la latency reale da NetMetrics in ms
+            nm = state['host'][host].get('non_server_data', {}).get('network_metrics', {})
+            latency_s = float(nm.get('avg_latency_s', 1.0)) if nm else 1.0
+            host_delay = latency_s * 1000  # converti in ms
             print(f'(Reinforcement) ====> Host {host} has real delay of {host_delay} ms')
             sum_real_delay = sum_real_delay + host_delay
-
-        max_real_delay = self.max_delay_ms  # transmission_time_ms 30000 ms => 600 ms
-        avg_real_delay = sum_real_delay / self.nbr_normal_hosts  # ms (for packet)
+        avg_real_delay = sum_real_delay / self.nbr_normal_hosts
         print(f'(Reinforcement) ====> Calculated avg_real_delay = {avg_real_delay} ms')
-
         return avg_real_delay
 
     def calculate_throughput(self, state):
@@ -1309,28 +1349,46 @@ class Environment():
             sum_throughput = sum_throughput + host_throughput
         avg_throughput = sum_throughput / self.nbr_normal_hosts
         print(f'(Reinforcement) ====> Calculated avg_throughput = {avg_throughput} bps')
+        for host in self.attacker_hosts:
+            try:
+                att_thr = state['host'][host]['non_server_data'].get('bytes_s', 0)
+                print(f'(Reinforcement) ====> Attacker {host} has throughput of {att_thr} bps')
+            except Exception:
+                pass
         return avg_throughput
 
     def calculate_latency(self, state):
         print("(Reinforcement) ==> Calculating latency")
         sum_latency = 0
         for host in self.normal_hosts:
-            host_latency = state['host'][host]['non_server_data']['network_metrics']['avg_latency_s']
+            host_latency = float(state['host'][host]['non_server_data']['network_metrics']['avg_latency_s'])
             print(f'(Reinforcement) ====> Host {host} has latency of {host_latency} s')
             sum_latency = sum_latency + host_latency
         avg_latency = sum_latency / self.nbr_normal_hosts
         print(f'(Reinforcement) ====> Calculated avg_latency = {avg_latency} s')
+        for host in self.attacker_hosts:
+            try:
+                att_lat = float(state['host'][host]['non_server_data'].get('network_metrics', {}).get('avg_latency_s', 0))
+                print(f'(Reinforcement) ====> Attacker {host} has latency of {att_lat} s')
+            except Exception:
+                pass
         return avg_latency
 
     def calculate_jitter(self, state):
         print("(Reinforcement) ==> Calculating jitter")
         sum_jitter = 0
         for host in self.normal_hosts:
-            host_jitter = state['host'][host]['non_server_data']['network_metrics']['avg_jitter_s']
+            host_jitter = float(state['host'][host]['non_server_data']['network_metrics']['avg_jitter_s'])
             print(f'(Reinforcement) ====> Host {host} has jitter of {host_jitter} s')
             sum_jitter = sum_jitter + host_jitter
         avg_jitter = sum_jitter / self.nbr_normal_hosts
         print(f'(Reinforcement) ====> Calculated avg_jitter = {avg_jitter} s')
+        for host in self.attacker_hosts:
+            try:
+                att_jit = float(state['host'][host]['non_server_data'].get('network_metrics', {}).get('avg_jitter_s', 0))
+                print(f'(Reinforcement) ====> Attacker {host} has jitter of {att_jit} s')
+            except Exception:
+                pass
         return avg_jitter
 
     def calculate_real_delay_reward(self, action_can_be_taken, avg_real_delay):
@@ -1426,6 +1484,56 @@ class Environment():
 
 
 
+
+    def calculate_attacker_metrics(self, config):
+        """Extract ICMP attacker metrics from tshark pcap."""
+        try:
+            from scapy.all import rdpcap, ICMP, IP
+            attacker_ips = [self.hosts_ips[h] for h in self.attacker_hosts if h in self.hosts_ips]
+            if not attacker_ips:
+                return {}
+            pcap_path = config.tshark_pcap_file_path
+            packets = rdpcap(pcap_path)
+            result = {}
+            for attacker_ip in attacker_ips:
+                icmp_pkts = [p for p in packets if IP in p and ICMP in p and p[IP].src == attacker_ip]
+                total_pkts = [p for p in packets if IP in p and p[IP].src == attacker_ip]
+                result[attacker_ip] = {
+                    'icmp_packets': len(icmp_pkts),
+                    'total_packets': len(total_pkts),
+                    'icmp_bytes': sum(len(p) for p in icmp_pkts),
+                }
+                print(f"(Reinforcement) ====> Attacker {attacker_ip}: icmp_pkts={len(icmp_pkts)} total_pkts={len(total_pkts)}")
+            return result
+        except Exception as e:
+            print(f"(Reinforcement) ====> Attacker metrics error: {e}")
+            return {}
+
+    def calculate_loss_reward(self, action_can_be_taken, avg_loss):
+        done = False
+        weighted_loss = avg_loss
+        if avg_loss >= self.max_latency_s:
+            reward = -3
+            done = True
+        elif avg_loss <= self.tolerable_loss:
+            reward = 3
+            done = True
+        elif self.DO_NOTHING_ACTION_SUCCESSIVE_COUNTER > self.MAX_DO_NOTHING_ACTION_BEFORE_PENALTY:
+            reward = -0.5
+            done = False
+        elif not action_can_be_taken:
+            reward = -1
+            done = False
+        else:
+            weighted_loss = self.alpha_weight * self.last_recorded_loss + (1 - self.alpha_weight) * avg_loss
+            change = self.last_recorded_loss - weighted_loss
+            reward = np.sign(change) * np.log2(np.abs(change) + 1)
+            done = False
+        self.last_recorded_loss = weighted_loss
+        self.loss_tracker.add_value(weighted_loss)
+        print(f"(Reinforcement) =====> Calculated loss reward as {reward} (done=>{done})")
+        return reward, done
+
     def calculate_reward(self, state, action_can_be_taken, bw_increase, path_length_increase):
         print("(Reinforcement) ==> Calculating reward")
 
@@ -1442,12 +1550,16 @@ class Environment():
         r2, d2 = self.calculate_latency_reward(action_can_be_taken, avg_latency)
         r3, d3 = self.calculate_jitter_reward(action_can_be_taken, avg_jitter)
 
-        reward = r1 + r2 + r3
+        r4, d4 = self.calculate_loss_reward(action_can_be_taken, avg_PKT_loss_percentage / 100.0)
+        w_lat = getattr(self, 'w_lat', 1.0)
+        w_jit = getattr(self, 'w_jit', 1.0)
+        w_loss = getattr(self, 'w_loss', 1.0)
+        reward = r1 + (w_lat * r2) + (w_jit * r3) + (w_loss * r4)
         # TODO: Set to False in order to calibrate the system
         # Apply penalty only if the action used resources but was ineffective
 
         # done = False
-        done = d1 or d2 or d3
+        done = d1 or d2 or d3 or d4
 
         if not done:
             #reward -= bw_increase/(self.INCREASING_FACTOR *10)
@@ -1457,6 +1569,38 @@ class Environment():
 
         print(f"(Reinforcement) <-----> result after calculating reward = {reward} (done={done})")
         return reward, done, avg_PKT_loss_percentage, avg_real_delay, avg_latency, avg_jitter
+
+
+    def save_timing_to_csv(self, config, episode, step):
+        """Save timing measurements for the current step to CSV."""
+        import csv as _csv
+        csv_path = config.timing_csv_path
+        # Compute durations (seconds)
+        tshark_sniff_s     = max(0.0, self._t_tshark_stop - self._t_tshark_start)
+        tcp_flow_s         = max(0.0, self._t_flow_end - self._t_flow_start)
+        attack_s           = max(0.0, self._t_attack_end - self._t_flow_start - 1.0)  # -1 per il time.sleep(1) prima dell'attacco
+        after_attack_s     = max(0.0, self._t_after_attack_end - self._t_attack_end)
+        tshark_processing_s= max(0.0, self._t_tshark_stop - self._t_after_attack_end)
+        netmetrics_s       = max(0.0, self._t_netmetrics_end - self._t_netmetrics_start)
+        total_s            = max(0.0, self._t_get_state_end - self._t_get_state_start)
+        # Write header if first time
+        write_header = not self._timing_csv_initialized
+        try:
+            with open(csv_path, 'a', newline='') as f:
+                w = _csv.writer(f)
+                if write_header:
+                    w.writerow(['episode', 'step', 'tshark_sniff_s', 'tcp_flow_s', 'attack_s',
+                                'after_attack_s', 'tshark_processing_s', 'netmetrics_s', 'total_s',
+                                'instance_id', 'timestamp'])
+                    self._timing_csv_initialized = True
+                w.writerow([episode, step,
+                            f"{tshark_sniff_s:.3f}", f"{tcp_flow_s:.3f}", f"{attack_s:.3f}",
+                            f"{after_attack_s:.3f}", f"{tshark_processing_s:.3f}",
+                            f"{netmetrics_s:.3f}", f"{total_s:.3f}",
+                            self.instance_id, time.time()])
+            print(f"(Timing) Episode {episode} Step {step}: total={total_s:.2f}s, attack={attack_s:.2f}s")
+        except Exception as e:
+            print(f"(Timing) ERROR writing CSV: {e}")
 
     def reset(self):
         print("----> Environment reset")
