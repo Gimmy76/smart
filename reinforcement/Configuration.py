@@ -30,11 +30,15 @@ class Configuration():
         print("(Reinforcement) Configuration.__init__()")
 
         self.is_play = False
+        self.instance_id = os.getenv('INSTANCE_ID', '0')
         self.model_full_path = ""
         self.predefined_attack_types = predefined_attack_types # If None, would fallback to full supported set
 
         # API
-        self.api_link = "http://localhost:5000"
+        trial_num = int(os.getenv('TRIAL_NUM', '0'))
+        port = 5000 + trial_num
+        self.api_link = f"http://localhost:{port}"
+        print(f"(Reinforcement) API link: {self.api_link}")
 
         # Network
         self.network_dir = os.getcwd() + "/../network" if NETWORKDIR is None else NETWORKDIR
@@ -43,7 +47,7 @@ class Configuration():
         self.network_command = f'{PYTHON} {self.network_entrypoint} --servers [SERVERS] --attackers [ATTACKERS] --hosts-topo-file [HOSTS_FILE] --manuel-receivers'
 
         # Temp directory
-        self.tmp_dir = os.getcwd() + "/tmp"
+        self.tmp_dir = os.path.dirname(os.path.abspath(__file__)) + f"/tmp_{self.instance_id}"
 
         self.host_groups_json_path = None
 
@@ -51,7 +55,7 @@ class Configuration():
         self.tshark_interfaces_command = 'tshark -D'
         self.tshark_pcap_file_name = 'tshark_out.pcap'
         self.tshark_pcap_file_path = f'{self.tmp_dir}/{self.tshark_pcap_file_name}'
-        self.tshark_sniffing_command = f'tshark [INTERFACES] -w [FILE_PATH]'  # INTERFACES to be replaced e.g: -i 1 -i 2
+        self.tshark_sniffing_command = f'tshark -i s0_{self.instance_id}-eth0 -f "tcp port 80 or icmp" -w [FILE_PATH]'  # Single interface, no duplicates
         self.tshark_overriden_pcap_file_path = CUSTOM_THSHARK_FILE
         self.tshark_should_override_pcap_file_path = (CUSTOM_THSHARK_FILE is not None)
 
@@ -69,11 +73,11 @@ class Configuration():
         # Network PCAP metrics calculator
         self.net_metrics_calculator_path = f'{os.getcwd()}/NetMetricsCalculator.py'
         self.net_metrics_result_file_path = f'{self.tmp_dir}/metrics.json'
-        self.net_metrics_command = f'{PYTHON} {self.net_metrics_calculator_path} -s [SERVER_IP] -p [SERVER_PORT] -hip [HOSTS_IPS] -t [DURATION] -b [BYTES]'
+        self.net_metrics_command = f'{PYTHON} {self.net_metrics_calculator_path} -s [SERVER_IP] -p [SERVER_PORT] -hip [HOSTS_IPS] -t [DURATION] -b [BYTES] -o {self.net_metrics_result_file_path} -pcap {self.tshark_pcap_file_path}'
 
         # Switch Grouping Folder
         self.switch_grouping_directory = self.tmp_dir
-        self.switch_grouping_file_path = f'{self.switch_grouping_directory}/switch_grouping.json'
+        self.switch_grouping_file_path = f'{self.tmp_dir}/switch_grouping_{self.instance_id}.json'
 
         # Results folder
         self.results_folder = os.getcwd() + "/results"
@@ -121,6 +125,13 @@ class Configuration():
         self.configs_folder = self.current_train_folder + "/configs"
         if not os.path.exists(self.configs_folder):
             os.makedirs(self.configs_folder)
+
+        # Timing folder for CSV with step-by-step durations
+        self.timing_folder = self.current_train_folder + "/timing"
+        if not os.path.exists(self.timing_folder):
+            os.makedirs(self.timing_folder)
+        self.timing_csv_path = self.timing_folder + "/timing.csv"
+        print(f"(Reinforcement) ==> Timing CSV will be saved to {self.timing_csv_path}")
         print(f"(Reinforcement) ==> All Configs will be saved in {self.configs_folder}")
 
         # Network Hosts
@@ -148,17 +159,20 @@ class Configuration():
             data = json.load(json_file)
             self.hosts_raw_topo = data
 
+        iid = self.instance_id
         for host in self.hosts_raw_topo:
             if not host.startswith("h"):
                 raise Exception(f"Host name ({host}) is not valid, accepted format 'h' + (number), example: 'h76'")
-            self.client_hosts_list.append(host)
-            self.host_default_switch_relation[host] = {'default_path_switch': self.hosts_raw_topo[host]['default_path_switch']}
-            router = self.hosts_raw_topo[host]['router_switch']
-            self.router_to_host_relation[router] = {'host': host}
-            self.host_to_router_relation[host] = {'router': router}
+            host_s = f"{host}_{iid}"
+            default_switch = f"{self.hosts_raw_topo[host]['default_path_switch']}_{iid}"
+            router = f"{self.hosts_raw_topo[host]['router_switch']}_{iid}"
+            self.client_hosts_list.append(host_s)
+            self.host_default_switch_relation[host_s] = {'default_path_switch': default_switch}
+            self.router_to_host_relation[router] = {'host': host_s}
+            self.host_to_router_relation[host_s] = {'router': router}
             self.router_switches_list.append(router)
-            self.router_to_controlled_switch_relation[router] = {'controlled_switch': self.hosts_raw_topo[host]['default_path_switch']}
-            if self.hosts_raw_topo[host]['default_path_switch'] in self.controlled_switch_to_router_relation:
-                self.controlled_switch_to_router_relation[self.hosts_raw_topo[host]['default_path_switch']]['routers'].append(router)
+            self.router_to_controlled_switch_relation[router] = {'controlled_switch': default_switch}
+            if default_switch in self.controlled_switch_to_router_relation:
+                self.controlled_switch_to_router_relation[default_switch]['routers'].append(router)
             else:
-                self.controlled_switch_to_router_relation[self.hosts_raw_topo[host]['default_path_switch']] = {'routers': [router]}
+                self.controlled_switch_to_router_relation[default_switch] = {'routers': [router]}
