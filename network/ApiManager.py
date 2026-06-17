@@ -18,6 +18,15 @@ from intermed import OvsIntermediateConstants as consts
 app = Flask(__name__)
 
 # Flask routes
+def safe_cmd(node, cmd, default=''):
+    """Wrapper per safe_cmd(GLOBALS.net[x], ) che gestisce AssertionError quando il nodo e' occupato."""
+    try:
+        return node.cmd(cmd)
+    except (AssertionError, Exception) as e:
+        print(f"(Network) WARNING: node busy/error, skipping cmd: {cmd[:60]} -- {e}")
+        return default
+
+
 @app.route("/")
 def mininet_network_up_page():
     return "<p>Network is up!</p>"
@@ -83,10 +92,12 @@ def get_link_information(src_switch, dst_switch):
         dst_int = GLOBALS.network_spec['switches'][src_switch]['connections'][dst_switch]['dst_int']
         bw = GLOBALS.network_spec['switches'][src_switch]['connections'][dst_switch]['bw']
         link_info['bw'] = bw
-        src_switch_interface_statistics = GLOBALS.net[src_switch].cmd(f'ovs-vsctl get interface {src_int} statistics')
-        dst_switch_interface_statistics = GLOBALS.net[dst_switch].cmd(f'ovs-vsctl get interface {dst_int} statistics')
+        src_switch_interface_statistics = safe_cmd(GLOBALS.net[src_switch], f'ovs-vsctl get interface {src_int} statistics')
+        dst_switch_interface_statistics = safe_cmd(GLOBALS.net[dst_switch], f'ovs-vsctl get interface {dst_int} statistics')
         for stat in src_switch_interface_statistics.replace("{", "").replace("}", "").split(","):
             item = stat.strip().split('=')
+            if len(item) < 2:
+                continue
             key = item[0]
             value = item[1]
             if key == 'tx_bytes':
@@ -94,6 +105,8 @@ def get_link_information(src_switch, dst_switch):
                 break
         for stat in dst_switch_interface_statistics.replace("{", "").replace("}", "").split(","):
             item = stat.strip().split('=')
+            if len(item) < 2:
+                continue
             key = item[0]
             value = item[1]
             if key == 'rx_bytes':
@@ -113,11 +126,11 @@ def change_host_status(host_name):
     turned_on = False
     if connected:
         turned_on = False
-        GLOBALS.net[connected_switch].cmd(shared.get_host_switch_turn_off_link_command(host_ip, connected_switch))
+        safe_cmd(GLOBALS.net[connected_switch], shared.get_host_switch_turn_off_link_command(host_ip, connected_switch))
         GLOBALS.network_spec['hosts'][host_name]['connected']= turned_on
     else:
         turned_on = True
-        GLOBALS.net[connected_switch].cmd(shared.get_host_switch_turn_on_link_command(host_ip, connected_switch, switch_port))
+        safe_cmd(GLOBALS.net[connected_switch], shared.get_host_switch_turn_on_link_command(host_ip, connected_switch, switch_port))
         GLOBALS.network_spec['hosts'][host_name]['connected'] = turned_on
     if turned_on:
         return f'the link of {host_name} is turned on successfully'
@@ -182,9 +195,9 @@ def start_ddos_flooding_attack(attacker_host, victim_host, attack_type):
     host_status = get_host_status(victim_host)
     victim_ip = host_status['ip']
     terminal_name = f'ddos-flooding-{attacker_host}-{victim_host}'
-    terminal = shared.makeCustomTerm(GLOBALS.net[attacker_host], title=terminal_name, cmd=f"{shared.PYTHON} -u {GLOBALS.network_dir}/ScapyFlooding.py -ip {victim_ip} -p 8999 -att {attack_type}")
-    GLOBALS.net.terms += terminal
-    GLOBALS.ddos_flooding_attacks[terminal_name] = terminal
+    pid_file = f'/tmp/scapy_{attacker_host}.pid'
+    safe_cmd(GLOBALS.net[attacker_host], f"{shared.PYTHON} {GLOBALS.network_dir}/ScapyFlooding.py -ip {victim_ip} -p 8999 -att {attack_type} & echo $! > {pid_file}")
+    GLOBALS.ddos_flooding_attacks[terminal_name] = {'host': attacker_host, 'pid_file': pid_file}
     log = f"Starting attack --> Attacker: {attacker_host} --> Victim: {victim_host}"
     print(f'(Network) ==> {log}')
     return log
@@ -193,10 +206,13 @@ def start_ddos_flooding_attack(attacker_host, victim_host, attack_type):
 def stop_ddos_flooding_attack(attacker_host, victim_host):
     global GLOBALS
     terminal_name = f'ddos-flooding-{attacker_host}-{victim_host}'
-    terminal = GLOBALS.ddos_flooding_attacks[terminal_name][0]
-    terminal.terminate()
-    GLOBALS.net.terms.remove(terminal)
-    del GLOBALS.ddos_flooding_attacks[terminal_name]
+    try:
+        entry = GLOBALS.ddos_flooding_attacks[terminal_name]
+        pid_file = entry['pid_file']
+        safe_cmd(GLOBALS.net[entry['host']], f"if [ -f {pid_file} ]; then pid=$(cat {pid_file}); kill $pid 2>/dev/null; rm -f {pid_file}; fi")
+        del GLOBALS.ddos_flooding_attacks[terminal_name]
+    except Exception as e:
+        print(f'Warning stopping ddos {terminal_name}: {e}')
     log = f"Stopping attack --> Attacker: {attacker_host} --> Victim: {victim_host}"
     print(f'(Network) ==> {log}')
     return log
@@ -235,9 +251,9 @@ def start_mhddos_attack(attacker_host, victim_host, attack_type):
         cmd += f" TCP {victim_ip}:80 50 100000"
         print(f"(Network) ==> Warning: Unknown attack type '{attack_type}'. Defaulting to TCP.")
     
-    terminal = shared.makeCustomTerm(GLOBALS.net[attacker_host], title=terminal_name, cmd=cmd)
-    GLOBALS.net.terms += terminal
-    GLOBALS.ddos_flooding_attacks[terminal_name] = terminal
+    pid_file = f'/tmp/mhddos_{attacker_host}.pid'
+    safe_cmd(GLOBALS.net[attacker_host], f"{cmd} & echo $! > {pid_file}")
+    GLOBALS.ddos_flooding_attacks[terminal_name] = {'host': attacker_host, 'pid_file': pid_file}
     
     log = f"Starting {attack_type} attack --> Attacker: {attacker_host} --> Victim: {victim_host}"
     print(f'(Network) ==> {log}')
@@ -247,10 +263,15 @@ def start_mhddos_attack(attacker_host, victim_host, attack_type):
 def stop_mhddos_attack(attacker_host, victim_host):
     global GLOBALS
     terminal_name = f'mhddos-{attacker_host}-{victim_host}'
-    terminal = GLOBALS.ddos_flooding_attacks[terminal_name][0]
-    terminal.terminate()
-    GLOBALS.net.terms.remove(terminal)
-    del GLOBALS.ddos_flooding_attacks[terminal_name]
+    try:
+        entry = GLOBALS.ddos_flooding_attacks[terminal_name]
+        pid_file = entry['pid_file']
+        safe_cmd(GLOBALS.net[attacker_host], 
+            f"if [ -f {pid_file} ]; then pid=$(cat {pid_file}); pgid=$(ps -o pgid= -p $pid 2>/dev/null | tr -d ' '); if [ -n \"$pgid\" ] && [ \"$pgid\" != \"1\" ]; then kill -- -$pgid 2>/dev/null; fi; kill -9 $pid 2>/dev/null; rm -f {pid_file}; fi"
+        )
+        del GLOBALS.ddos_flooding_attacks[terminal_name]
+    except Exception as e:
+        print(f'(Network) ==> Warning stopping mhddos {terminal_name}: {e}')
     log = f"Stopping attack --> Attacker: {attacker_host} --> Victim: {victim_host}"
     print(f'(Network) ==> {log}')
     return log
@@ -263,19 +284,20 @@ def reset_http_server():
         get_pid_using_port(host_name, server_port)
 
     info("(Network) ==> stopping HTTP server...\n")
-    for terminal_wrapper in GLOBALS.http_servers:
-        terminal = terminal_wrapper[0]
-        terminal.terminate()
-        GLOBALS.net.terms.remove(terminal)
+    for entry in GLOBALS.http_servers:
+        try:
+            pid_file = entry['pid_file']
+            safe_cmd(GLOBALS.net[entry['host']], f"if [ -f {pid_file} ]; then pid=$(cat {pid_file}); kill $pid 2>/dev/null; rm -f {pid_file}; fi")
+        except Exception as e:
+            print(f'Warning stopping http server: {e}')
     GLOBALS.http_servers = []
 
     for host_name in GLOBALS.servers:
         ip = get_host_status(host_name)['ip']
         check_port_used_and_kill_process(host_name, server_port)
-        terminal = shared.makeCustomTerm(GLOBALS.net[host_name], title=f"Host {host_name} HTTP-Server",
-                            cmd=f"{shared.PYTHON} -u {GLOBALS.http_server_file} -n {host_name} -ip {ip}")
-        GLOBALS.net.terms += terminal
-        GLOBALS.http_servers.append(terminal)
+        pid_file = f'/tmp/httpserver_{host_name}.pid'
+        safe_cmd(GLOBALS.net[host_name], f"{shared.PYTHON} {GLOBALS.http_server_file} -n {host_name} -ip {ip} & echo $! > {pid_file}")
+        GLOBALS.http_servers.append({'host': host_name, 'pid_file': pid_file})
         info("(Network) ==> starting HTTP server...\n")
 
     log = f"HTTP server reset for hosts: {GLOBALS.servers}"
@@ -288,18 +310,18 @@ def get_host_interface_statistics(host_name):
     host_status = get_host_status(host_name)
     # for example: interface is s2-eth3, where s2 is the switch, 3 is the port
     interface = f"{host_status['dst_int']}"
-    return GLOBALS.net[host_status['router_switch']].cmd(f'ovs-vsctl get interface {interface} statistics')
+    return safe_cmd(GLOBALS.net[host_status['router_switch']], f'ovs-vsctl get interface {interface} statistics')
 
 @app.route("/get-host-ifconfig/<host>")
 def get_host_ifconfig(host):
     global GLOBALS
-    return GLOBALS.net[host].cmd(f'ifconfig')
+    return safe_cmd(GLOBALS.net[host], f'ifconfig')
 
 @app.route("/get-switch-statistics/<switch>/<interface_name>")
 def get_switch_interface_statistics(switch, interface_name):
     global GLOBALS
     interface = interface_name
-    return GLOBALS.net[switch].cmd(f'ovs-vsctl get interface {interface} statistics')
+    return safe_cmd(GLOBALS.net[switch], f'ovs-vsctl get interface {interface} statistics')
 
 @app.route("/start-ditg-flow/<source_host>/<destination_host>/<duration_ms>")
 def start_ditg_flow(source_host, destination_host, duration_ms):
@@ -331,105 +353,73 @@ def start_ditg_flow_thread(source_host, destination_host, duration_ms):
     print(f'running with {duration_ms}')
     # Creating terminals
     # sleep is added in order for the sender to wait the receiver to be started
-    source_terminal = shared.makeCustomTerm(GLOBALS.net[source_host], title=source_terminal_name,
-                               cmd=f"{GLOBALS.ditg_directory}/ITGSend -T TCP -a {destination_host_status['ip']} -t {duration_ms} -z 60001")
-
-    # Adding terminals to Mininet
-    GLOBALS.net.terms += source_terminal
-
-    # Adding terminals to Global dictionary
-    GLOBALS.ditg_flows[source_terminal_name] = source_terminal
-
-    # Wait for the flow to be sent
-    source_terminal[0].wait()
-
-    # remove entries from the dict
-    if source_terminal[0] in GLOBALS.net.terms:
-        GLOBALS.net.terms.remove(source_terminal[0])
-    if source_terminal_name in GLOBALS.ditg_flows:
-        del GLOBALS.ditg_flows[source_terminal_name]
+    pid_file = f'/tmp/ditg_{source_host}.pid'
+    safe_cmd(GLOBALS.net[source_host], f"{GLOBALS.ditg_directory}/ITGSend -T TCP -a {destination_host_status['ip']} -t {duration_ms} -z 60001 & echo $! > {pid_file}")
+    GLOBALS.ditg_flows[source_terminal_name] = {'host': source_host, 'pid_file': pid_file}
 
 
 def start_tcp_flow_thread(source_host, destination_host, duration_ms):
     global GLOBALS
-    destination_host_status = get_host_status(destination_host)
-
-    # Terminal names
+    try:
+        destination_host_status = get_host_status(destination_host)
+    except Exception as e:
+        print(f'(Network) WARNING: start_tcp_flow_thread failed getting host status: {e}')
+        return
     source_terminal_name = f'tcp-flow-{source_host}-{destination_host}-src'
     duration_s = int(int(duration_ms) / 1000)
-    print(f'(Network) ==> running {source_terminal_name} with {duration_s} s')
-    # Creating terminals
-    # sleep is added in order for the sender to wait the receiver to be started
-    source_terminal = shared.makeCustomTerm(GLOBALS.net[source_host], title=source_terminal_name,
-                               cmd=f"{shared.PYTHON} -u {GLOBALS.tcp_flow_client_file} -n {source_host} -ip {destination_host_status['ip']} -t {duration_s} -np 100000")
-
-    # Adding terminals to Mininet
-    GLOBALS.net.terms += source_terminal
-
-    # Adding terminals to Global dictionary
-    GLOBALS.tcp_flows[source_terminal_name] = source_terminal
-
-    # Wait for the flow to be sent
-    source_terminal[0].wait()
-    print(f'(Network) ==> xterm {source_terminal_name} terminated')
-    # remove entries from the dict
-    if source_terminal[0] in GLOBALS.net.terms:
-        GLOBALS.net.terms.remove(source_terminal[0])
-        print(f'(Network) ==> removing xterm {source_terminal_name}')
-    if source_terminal_name in GLOBALS.tcp_flows:
-        del GLOBALS.tcp_flows[source_terminal_name]
-        print(f'(Network) ==> deleting dict {source_terminal_name}')
-    print(f'(Network) ==> stopped {source_terminal_name}')
+    pid_file = f'/tmp/tcpflow_{source_host}.pid'
+    print(f'(Network) ==> TCP flow {source_host}->{destination_host} for {duration_s}s')
+    safe_cmd(GLOBALS.net[source_host], 
+        f"{shared.PYTHON} {GLOBALS.tcp_flow_client_file} -n {source_host}"
+        f" -ip {destination_host_status['ip']} -t {duration_s} -np 100000 & "
+        f"echo $! > {pid_file}"
+    )
+    GLOBALS.tcp_flows[source_terminal_name] = {'host': source_host, 'pid_file': pid_file}
+    print(f'(Network) ==> started {source_terminal_name}')
 
 @app.route("/stop-all-ditg-flows")
 def stop_all_ditg_flows():
     global GLOBALS
-    keys = [key for key in GLOBALS.ditg_flows.keys()]
-    for source_terminal_name in keys:
-        terminal = GLOBALS.ditg_flows[source_terminal_name][0]
-        if terminal in GLOBALS.net.terms:
-            GLOBALS.net.terms.remove(terminal)
-            print(f'(Network) ==> removing xterm {source_terminal_name}')
-        if source_terminal_name in GLOBALS.ditg_flows:
-            terminal.terminate()
-            del GLOBALS.ditg_flows[source_terminal_name]
-            print(f'(Network) ==> deleting dict {source_terminal_name}')
+    for name, entry in list(GLOBALS.ditg_flows.items()):
+        try:
+            safe_cmd(GLOBALS.net[entry["host"]], f"if [ -f {entry['pid_file']} ]; then pid=$(cat {entry['pid_file']}); kill $pid 2>/dev/null; rm -f {entry['pid_file']}; fi")
+        except Exception as e:
+            print(f'Warning stopping ditg {name}: {e}')
+    GLOBALS.ditg_flows.clear()
     print(f'(Network) ==> Stopped all DITG flows')
-    return f"Stopped all DITG flows"
+    return "Stopped all DITG flows"
 
 @app.route("/stop-all-tcp-flows")
 def stop_all_tcp_flows():
     global GLOBALS
-    keys = [key for key in GLOBALS.tcp_flows.keys()]
-    for source_terminal_name in keys:
-        print(f'(Network) ==> preparing to remove xterm {source_terminal_name}')
-        if source_terminal_name in GLOBALS.tcp_flows.keys():
-            terminal = GLOBALS.tcp_flows[source_terminal_name][0]
-            if terminal in GLOBALS.net.terms:
-                GLOBALS.net.terms.remove(terminal)
-                print(f'(Network) ==> removing xterm {source_terminal_name}')
-            if source_terminal_name in GLOBALS.tcp_flows:
-                terminal.terminate()
-                try:
-                    del GLOBALS.tcp_flows[source_terminal_name]
-                    print(f'(Network) ==> deleting dict {source_terminal_name}')
-                except KeyError:
-                    print(f'(Network) ==> xterm {source_terminal_name} has been already deleted by another thread')
-                    pass
-        else:
-            print(f'(Network) ==> xterm {source_terminal_name} has been already deleted by another thread')
+    for name, entry in list(GLOBALS.tcp_flows.items()):
+        try:
+            host = entry['host']
+            pid_file = entry['pid_file']
+            safe_cmd(GLOBALS.net[host], 
+                f"if [ -f {pid_file} ]; then "
+                f"  pid=$(cat {pid_file}); "
+                f"  kill $pid 2>/dev/null; "
+                f"  rm -f {pid_file}; "
+                f"fi"
+            )
+        except Exception as e:
+            print(f'(Network) ==> Warning stopping tcp flow {name}: {e}')
+    GLOBALS.tcp_flows.clear()
     print(f'(Network) ==> Stopped all TCP flows')
-    return f"Stopped all TCP flows"
+    return "Stopped all TCP flows"
 
 
 @app.route("/reset-ditg-receivers")
 def reset_ditg_receivers():
     global GLOBALS
 
-    for terminal_wrapper in GLOBALS.ditg_receivers:
-        terminal = terminal_wrapper[0]
-        terminal.terminate()
-        GLOBALS.net.terms.remove(terminal)
+    for entry in GLOBALS.ditg_receivers:
+        try:
+            pid_file = entry['pid_file']
+            safe_cmd(GLOBALS.net[entry['host']], f"if [ -f {pid_file} ]; then pid=$(cat {pid_file}); kill $pid 2>/dev/null; rm -f {pid_file}; fi")
+        except Exception as e:
+            print(f'Warning stopping ditg receiver: {e}')
     GLOBALS.ditg_receivers = []
 
     for host_name in GLOBALS.servers:
@@ -438,10 +428,9 @@ def reset_ditg_receivers():
             os.remove(f"{GLOBALS.tmp_dir}/ITGRecv.log")
         except FileNotFoundError:
             pass
-        terminal = shared.makeCustomTerm(GLOBALS.net[host_name], title=f"Host {host_name} DITG-Receiver",
-                                      cmd=f"nice -n -20 {GLOBALS.ditg_directory}/ITGRecv -l {GLOBALS.tmp_dir}/ITGRecv.log")
-        GLOBALS.net.terms += terminal
-        GLOBALS.ditg_receivers.append(terminal)
+        pid_file = f'/tmp/ditgrecv_{host_name}.pid'
+        safe_cmd(GLOBALS.net[host_name], f"nice -n -20 {GLOBALS.ditg_directory}/ITGRecv -l {GLOBALS.tmp_dir}/ITGRecv.log & echo $! > {pid_file}")
+        GLOBALS.ditg_receivers.append({'host': host_name, 'pid_file': pid_file})
 
     log = f"Resetting DITG for hosts: {GLOBALS.servers}"
     print(f'(Network) ==> {log}')
@@ -455,20 +444,23 @@ def reset_tcp_receivers():
         get_pid_using_port(host_name, server_port)
 
     info("(Network) ==> stopping server...\n")
-    for terminal_wrapper in GLOBALS.tcp_receivers:
-        terminal = terminal_wrapper[0]
-        terminal.terminate()
-        GLOBALS.net.terms.remove(terminal)
+    for entry in GLOBALS.tcp_receivers:
+        try:
+            pid_file = entry['pid_file']
+            safe_cmd(GLOBALS.net[entry['host']], f"if [ -f {pid_file} ]; then pid=$(cat {pid_file}); kill $pid 2>/dev/null; rm -f {pid_file}; fi")
+        except Exception as e:
+            print(f'Warning stopping tcp receiver: {e}')
     GLOBALS.tcp_receivers = []
 
 
     for host_name in GLOBALS.servers:
         ip = get_host_status(host_name)['ip']
         check_port_used_and_kill_process(host_name, server_port)
-        terminal = shared.makeCustomTerm(GLOBALS.net[host_name], title=f"Host {host_name} TCP-Receiver",
-                            cmd=f"{shared.PYTHON} -u {GLOBALS.tcp_flow_server_file} -n {host_name} -ip {ip}")
-        GLOBALS.net.terms += terminal
-        GLOBALS.tcp_receivers.append(terminal)
+        pid_file = f'/tmp/tcpserver_{host_name}.pid'
+        safe_cmd(GLOBALS.net[host_name], 
+            f"{shared.PYTHON} {GLOBALS.tcp_flow_server_file} -n {host_name} -ip {ip} & echo $! > {pid_file}"
+        )
+        GLOBALS.tcp_receivers.append({'host': host_name, 'pid_file': pid_file})
         info("(Network) ==> starting server...\n")
 
     log = f"Resetting TCP for hosts: {GLOBALS.servers}"
@@ -483,10 +475,13 @@ def stop_tcp_receivers():
         get_pid_using_port(host_name, server_port)
 
     info("(Network) ==> stopping server...\n")
-    for terminal_wrapper in GLOBALS.tcp_receivers:
-        terminal = terminal_wrapper[0]
-        terminal.terminate()
-        GLOBALS.net.terms.remove(terminal)
+    for entry in GLOBALS.tcp_receivers:
+        try:
+            pid_file = entry['pid_file']
+            host = entry['host']
+            safe_cmd(GLOBALS.net[host], f"if [ -f {pid_file} ]; then pid=$(cat {pid_file}); kill $pid 2>/dev/null; rm -f {pid_file}; fi")
+        except Exception as e:
+            print(f'Warning stopping tcp receiver: {e}')
     GLOBALS.tcp_receivers = []
 
     log = f"Stopped TCP for hosts: {GLOBALS.servers}"
@@ -495,7 +490,11 @@ def stop_tcp_receivers():
 
 def get_pid_using_port(host_name, port):
     # Getting the process using port 80
-    used_port_result = GLOBALS.net[host_name].cmd(f"ss -lptn 'sport = :{port}'")
+    try:
+        used_port_result = safe_cmd(GLOBALS.net[host_name], f"ss -lptn 'sport = :{port}'")
+    except AssertionError:
+        print(f"(Network) WARNING: node {host_name} is busy (waiting), skipping get_pid_using_port")
+        return 'None'
     info(used_port_result + "\n")
     # If port 80 is used, the result should have "..., pid={process-id},"
     pattern = re.compile(r'pid=(\d+)')
@@ -511,7 +510,7 @@ def check_port_used_and_kill_process(host_name, port):
     if not pid_value == 'None':
         # Killing the process
         info(f"(Network) ==> killing process using port <{port}> in host <{host_name}> with 'pid' <{pid_value}>\n")
-        info(GLOBALS.net[host_name].cmd(f"kill {pid_value}") + "\n")
+        info(safe_cmd(GLOBALS.net[host_name], f"kill {pid_value}") + "\n")
 
 @app.route("/get-host-bw/<host>")
 def get_host_bw(host):
@@ -803,12 +802,10 @@ def redirect_switch_flow_old(src_switch, flow_number):
     return 'flow redirected'
 ################# To be removed ##############################################################################################
 def run_flask_thread():
-    port = 5000
-    # If port 5000 is already in use:
-    #  1. CMD => sudo ss -lptn 'sport = :5000'
-    #  2. get the "... pid={process-id} ..."
-    #  3. CMD => sudo kill {process-id}
-    app.run(debug=False, port=port)
+    trial_num = int(os.getenv('TRIAL_NUM', '0'))
+    port = 5000 + trial_num
+    print(f"(Network) Flask listening on port {port}")
+    app.run(debug=False, port=port, host='0.0.0.0')
 
 def run_flask(_GLOBALS):
     global GLOBALS
