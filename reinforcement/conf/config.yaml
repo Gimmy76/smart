@@ -1,0 +1,17 @@
+defaults:
+  - _self_
+mode: "train"
+hosts_topo: "hosts-toplogy-6hosts.json"
+attackers:
+  - h5
+episodes: 50
+steps: 100
+epsilon_decay: 0.990
+nbr_controlled_switches: 4
+tune_trials: 5
+study_name: "smart_default"
+optuna_storage: "sqlite:////home/giovanni/optuna_studies/smart_default.db"
+training:
+  learning_rate: 0.025
+  discount_factor: 0.85
+predefined_attack_types: "ICMP"
